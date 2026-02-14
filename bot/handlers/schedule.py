@@ -1,0 +1,173 @@
+from aiogram import Router, F
+from aiogram.types import CallbackQuery
+from datetime import datetime, timedelta
+import locale
+from aiogram.fsm.context import FSMContext
+from bot.keyboards import get_main_keyboard
+from bot.db import (
+    get_user,
+    get_schedule,
+    get_replacements_for_date_and_class,
+    get_all_future_replacements,
+    get_notify_status,
+    get_parallels  # для change_class
+)
+from bot.config import DAYS, WEEKDAY_MAP
+from bot.utils import format_class_display, format_lesson_with_replacement, format_date_short
+
+router = Router()
+
+# Попытка установить русскую локаль для отображения дней недели
+try:
+    locale.setlocale(locale.LC_TIME, 'ru_RU.UTF-8')
+except:
+    pass
+
+def get_week_dates(base_date: datetime) -> dict[str, str]:
+    """
+    Возвращает словарь: день недели (строка, нижний регистр) -> дата в формате YYYY-MM-DD
+    для дней начиная с base_date (сегодня) и до конца недели (пятница).
+    Если base_date уже после пятницы, возвращаем пустой словарь.
+    """
+    dates = {}
+    current = base_date
+    while current.weekday() < 5:  # пока не суббота
+        day_name = WEEKDAY_MAP[current.weekday()]
+        dates[day_name] = current.strftime("%Y-%m-%d")
+        current += timedelta(days=1)
+    return dates
+
+@router.callback_query(F.data == "today")
+async def show_today(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    user_data = get_user(user_id)
+    if not user_data:
+        await callback.message.edit_text(
+            "Сначала выбери класс.",
+            reply_markup=get_main_keyboard(False)
+        )
+        await callback.answer()
+        return
+
+    class_name, profile = user_data
+    today_name = WEEKDAY_MAP[datetime.today().weekday()]
+    today_str = datetime.today().strftime("%Y-%m-%d")
+    schedule = get_schedule(class_name, profile, today_name)
+    replacements = get_replacements_for_date_and_class(today_str, class_name)
+
+    if not schedule:
+        text = f"На {today_name} уроков нет."
+    else:
+        text = f"📚 Расписание на {today_name} ({format_class_display(class_name, profile)}):\n\n"
+        for lesson_num, subject, room in schedule:
+            repl_info = replacements.get(lesson_num)
+            text += format_lesson_with_replacement(lesson_num, subject, room, repl_info) + "\n"
+
+    notify_enabled = get_notify_status(user_id)
+    await callback.message.edit_text(text, reply_markup=get_main_keyboard(notify_enabled))
+    await callback.answer()
+
+@router.callback_query(F.data == "week")
+async def show_week(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    user_data = get_user(user_id)
+    if not user_data:
+        await callback.message.edit_text(
+            "Сначала выбери класс.",
+            reply_markup=get_main_keyboard(False)
+        )
+        await callback.answer()
+        return
+
+    class_name, profile = user_data
+    schedule = get_schedule(class_name, profile)
+    if not schedule:
+        await callback.message.edit_text("Расписание не найдено.", reply_markup=get_main_keyboard(False))
+        await callback.answer()
+        return
+
+    # Группируем расписание по дням
+    by_day = {}
+    for day, lesson_num, subject, room in schedule:
+        by_day.setdefault(day, []).append((lesson_num, subject, room))
+
+    # Определяем даты для дней недели, начиная с сегодня
+    today = datetime.today()
+    week_dates = get_week_dates(today)
+
+    # Получаем замены для каждого дня из week_dates
+    replacements_by_day = {}
+    for day_name, date_str in week_dates.items():
+        replacements_by_day[day_name] = get_replacements_for_date_and_class(date_str, class_name)
+
+    text = f"📆 Расписание на неделю для {format_class_display(class_name, profile)}:\n\n"
+    for day in DAYS:
+        if day in by_day:
+            # Если день есть в расписании
+            day_header = f"<b>{day.capitalize()}</b>"
+            # Если для этого дня известна дата, добавим её
+            if day in week_dates:
+                day_header += f" ({format_date_short(week_dates[day])})"
+            text += day_header + ":\n"
+
+            for lesson_num, subject, room in sorted(by_day[day], key=lambda x: x[0]):
+                repl_info = replacements_by_day.get(day, {}).get(lesson_num)
+                text += format_lesson_with_replacement(lesson_num, subject, room, repl_info) + "\n"
+            text += "\n"
+        else:
+            text += f"<b>{day.capitalize()}</b>: нет уроков\n\n"
+
+    notify_enabled = get_notify_status(user_id)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyboard(notify_enabled))
+    await callback.answer()
+
+@router.callback_query(F.data == "replacements")
+async def show_replacements(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    user_data = get_user(user_id)
+    if not user_data:
+        await callback.message.edit_text(
+            "Сначала выбери класс.",
+            reply_markup=get_main_keyboard(False)
+        )
+        await callback.answer()
+        return
+
+    replacements = get_all_future_replacements()
+    if not replacements:
+        text = "На ближайшие дни замен нет."
+    else:
+        text = "<b>Будущие замены</b>:\n\n"
+        current_date = None
+        for date_str, lesson, class_name, subject, teacher, room in replacements:
+            if date_str != current_date:
+                current_date = date_str
+                text += f"\n📅 {format_date_short(date_str)}:\n"
+            # Формируем строку замены
+            line = f"  {lesson} урок — {class_name}, {subject}"
+            if teacher or room:
+                line += " ("
+                if teacher:
+                    line += f"замена: {teacher}"
+                if teacher and room:
+                    line += ", "
+                if room:
+                    line += f"каб. {room}"
+                line += ")"
+            text += line + "\n"
+
+    notify_enabled = get_notify_status(user_id)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyboard(notify_enabled))
+    await callback.answer()
+
+@router.callback_query(F.data == "change_class")
+async def change_class(callback: CallbackQuery, state: FSMContext):
+    from bot.handlers.start import ClassChoice
+    from bot.keyboards import get_parallels_keyboard
+    parallels = get_parallels()
+    await callback.message.edit_text(
+        "Выбери новую цифру класса:",
+        reply_markup=get_parallels_keyboard(parallels)
+    )
+    await state.set_state(ClassChoice.waiting_for_parallel)
+    await callback.answer()
