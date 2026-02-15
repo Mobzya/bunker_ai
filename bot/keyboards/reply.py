@@ -38,18 +38,17 @@ def get_profiles_keyboard(class_name: str, profiles: list[str]) -> InlineKeyboar
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_main_keyboard(notify_enabled: bool = True) -> InlineKeyboardMarkup:
-    """Главное меню с динамической кнопкой уведомлений"""
+    """Главное меню с динамической кнопкой уведомлений (без кнопки 'Сегодня')"""
     notify_text = "🔔 Уведомления: ВКЛ" if notify_enabled else "🔕 Уведомления: ВЫКЛ"
     buttons = [
         [InlineKeyboardButton(text=notify_text, callback_data="toggle_notify")],
-        [InlineKeyboardButton(text="📅 Сегодня", callback_data="today")],
         [InlineKeyboardButton(text="📆 Неделя", callback_data="week")],
         [InlineKeyboardButton(text="📋 Замены", callback_data="replacements")],
         [InlineKeyboardButton(text="🔄 Сменить класс", callback_data="change_class")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-# (опционально) старые клавиатуры можно оставить
+# (опционально) старая клавиатура, может пригодиться
 def get_classes_keyboard(classes: list[str]) -> InlineKeyboardMarkup:
     buttons = []
     row = []

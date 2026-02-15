@@ -2,6 +2,7 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from datetime import datetime, timedelta
 import locale
+import logging
 from aiogram.fsm.context import FSMContext
 from bot.keyboards import get_main_keyboard
 from bot.db import (
@@ -10,10 +11,12 @@ from bot.db import (
     get_replacements_for_date_and_class,
     get_all_future_replacements,
     get_notify_status,
-    get_parallels  # для change_class
+    get_parallels
 )
 from bot.config import DAYS, WEEKDAY_MAP
 from bot.utils import format_class_display, format_lesson_with_replacement, format_date_short
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -42,6 +45,7 @@ async def show_today(callback: CallbackQuery):
     user_id = callback.from_user.id
     user_data = get_user(user_id)
     if not user_data:
+        logger.warning(f"Пользователь {user_id} попытался посмотреть сегодня без выбора класса")
         await callback.message.edit_text(
             "Сначала выбери класс.",
             reply_markup=get_main_keyboard(False)
@@ -55,16 +59,18 @@ async def show_today(callback: CallbackQuery):
     schedule = get_schedule(class_name, profile, today_name)
     replacements = get_replacements_for_date_and_class(today_str, class_name)
 
+    logger.info(f"Пользователь {user_id} запросил расписание на сегодня ({class_name})")
+
     if not schedule:
-        text = f"На {today_name} уроков нет."
+        text = f"📭 На {today_name} уроков нет."
     else:
-        text = f"📚 Расписание на {today_name} ({format_class_display(class_name, profile)}):\n\n"
+        text = f"📚 <b>Расписание на {today_name}</b> ({format_class_display(class_name, profile)}):\n\n"
         for lesson_num, subject, room in schedule:
             repl_info = replacements.get(lesson_num)
             text += format_lesson_with_replacement(lesson_num, subject, room, repl_info) + "\n"
 
     notify_enabled = get_notify_status(user_id)
-    await callback.message.edit_text(text, reply_markup=get_main_keyboard(notify_enabled))
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyboard(notify_enabled))
     await callback.answer()
 
 @router.callback_query(F.data == "week")
@@ -72,6 +78,7 @@ async def show_week(callback: CallbackQuery):
     user_id = callback.from_user.id
     user_data = get_user(user_id)
     if not user_data:
+        logger.warning(f"Пользователь {user_id} попытался посмотреть неделю без выбора класса")
         await callback.message.edit_text(
             "Сначала выбери класс.",
             reply_markup=get_main_keyboard(False)
@@ -82,9 +89,12 @@ async def show_week(callback: CallbackQuery):
     class_name, profile = user_data
     schedule = get_schedule(class_name, profile)
     if not schedule:
+        logger.info(f"Для пользователя {user_id} расписание не найдено")
         await callback.message.edit_text("Расписание не найдено.", reply_markup=get_main_keyboard(False))
         await callback.answer()
         return
+
+    logger.info(f"Пользователь {user_id} запросил расписание на неделю ({class_name})")
 
     # Группируем расписание по дням
     by_day = {}
@@ -100,11 +110,11 @@ async def show_week(callback: CallbackQuery):
     for day_name, date_str in week_dates.items():
         replacements_by_day[day_name] = get_replacements_for_date_and_class(date_str, class_name)
 
-    text = f"📆 Расписание на неделю для {format_class_display(class_name, profile)}:\n\n"
+    text = f"📆 <b>Расписание на неделю</b> для {format_class_display(class_name, profile)}:\n\n"
     for day in DAYS:
         if day in by_day:
             # Если день есть в расписании
-            day_header = f"<b>{day.capitalize()}</b>"
+            day_header = f"📅 <b>{day.capitalize()}</b>"
             # Если для этого дня известна дата, добавим её
             if day in week_dates:
                 day_header += f" ({format_date_short(week_dates[day])})"
@@ -115,7 +125,7 @@ async def show_week(callback: CallbackQuery):
                 text += format_lesson_with_replacement(lesson_num, subject, room, repl_info) + "\n"
             text += "\n"
         else:
-            text += f"<b>{day.capitalize()}</b>: нет уроков\n\n"
+            text += f"📅 <b>{day.capitalize()}</b>: нет уроков\n\n"
 
     notify_enabled = get_notify_status(user_id)
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyboard(notify_enabled))
@@ -126,6 +136,7 @@ async def show_replacements(callback: CallbackQuery):
     user_id = callback.from_user.id
     user_data = get_user(user_id)
     if not user_data:
+        logger.warning(f"Пользователь {user_id} попытался посмотреть замены без выбора класса")
         await callback.message.edit_text(
             "Сначала выбери класс.",
             reply_markup=get_main_keyboard(False)
@@ -133,37 +144,81 @@ async def show_replacements(callback: CallbackQuery):
         await callback.answer()
         return
 
-    replacements = get_all_future_replacements()
-    if not replacements:
-        text = "На ближайшие дни замен нет."
-    else:
-        text = "<b>Будущие замены</b>:\n\n"
-        current_date = None
-        for date_str, lesson, class_name, subject, teacher, room in replacements:
-            if date_str != current_date:
-                current_date = date_str
-                text += f"\n📅 {format_date_short(date_str)}:\n"
-            # Формируем строку замены
-            line = f"  {lesson} урок — {class_name}, {subject}"
-            if teacher or room:
-                line += " ("
-                if teacher:
-                    line += f"замена: {teacher}"
-                if teacher and room:
-                    line += ", "
-                if room:
-                    line += f"каб. {room}"
-                line += ")"
-            text += line + "\n"
+    class_name, profile = user_data
+    user_class_display = format_class_display(class_name, profile)
+    logger.info(f"Пользователь {user_id} запросил замены")
 
+    all_replacements = get_all_future_replacements()
+
+    # Разделяем
+    user_repl = []
+    other_repl = []
+    for repl in all_replacements:
+        date, lesson, repl_class, subject, teacher, room = repl
+        if repl_class == user_class_display:
+            user_repl.append(repl)
+        else:
+            other_repl.append(repl)
+
+    text_parts = []
+
+    # Блок замен для класса пользователя
+    text_parts.append("<b>🔔 Замены для вашего класса</b>:\n")
+    if user_repl:
+        by_date = {}
+        for date, lesson, repl_class, subject, teacher, room in user_repl:
+            by_date.setdefault(date, []).append((lesson, subject, teacher, room))
+        for date in sorted(by_date.keys()):
+            text_parts.append(f"\n📅 {format_date_short(date)}:")
+            for lesson, subject, teacher, room in sorted(by_date[date], key=lambda x: x[0]):
+                line = f"  • {lesson} урок — <b>{subject}</b>"
+                if teacher or room:
+                    line += " ("
+                    if teacher:
+                        line += f"👤 {teacher}"
+                    if teacher and room:
+                        line += ", "
+                    if room:
+                        line += f"🚪 {room}"
+                    line += ")"
+                text_parts.append(line)
+    else:
+        text_parts.append("   Нет замен для вашего класса.")
+
+    # Разделитель
+    text_parts.append("\n\n<b>📌 Остальные замены</b>:\n")
+
+    if other_repl:
+        by_date = {}
+        for date, lesson, repl_class, subject, teacher, room in other_repl:
+            by_date.setdefault(date, []).append((lesson, repl_class, subject, teacher, room))
+        for date in sorted(by_date.keys()):
+            text_parts.append(f"\n📅 {format_date_short(date)}:")
+            for lesson, repl_class, subject, teacher, room in sorted(by_date[date], key=lambda x: (x[1], x[0])):
+                line = f"  • {lesson} урок — <b>{repl_class}</b>, {subject}"
+                if teacher or room:
+                    line += " ("
+                    if teacher:
+                        line += f"👤 {teacher}"
+                    if teacher and room:
+                        line += ", "
+                    if room:
+                        line += f"🚪 {room}"
+                    line += ")"
+                text_parts.append(line)
+    else:
+        text_parts.append("   Нет других замен.")
+
+    final_text = "\n".join(text_parts)
     notify_enabled = get_notify_status(user_id)
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyboard(notify_enabled))
+    await callback.message.edit_text(final_text, parse_mode="HTML", reply_markup=get_main_keyboard(notify_enabled))
     await callback.answer()
 
 @router.callback_query(F.data == "change_class")
 async def change_class(callback: CallbackQuery, state: FSMContext):
     from bot.handlers.start import ClassChoice
     from bot.keyboards import get_parallels_keyboard
+    logger.info(f"Пользователь {callback.from_user.id} меняет класс")
     parallels = get_parallels()
     await callback.message.edit_text(
         "Выбери новую цифру класса:",

@@ -1,8 +1,11 @@
 import sqlite3
 import re
 import datetime
+import logging
 from typing import List, Tuple, Optional
 from .config import DB_PATH
+
+logger = logging.getLogger(__name__)
 
 def get_connection():
     return sqlite3.connect(DB_PATH)
@@ -53,6 +56,7 @@ def init_db():
             )
         ''')
         conn.commit()
+    logger.info("База данных инициализирована")
 
 # ========== РАСПИСАНИЕ ==========
 
@@ -64,12 +68,14 @@ def add_schedule(class_name: str, profile: Optional[str], day: str, lesson_numbe
             VALUES (?, ?, ?, ?, ?, ?)
         ''', (class_name, profile, day, lesson_number, subject, room))
         conn.commit()
+    logger.debug(f"Добавлено расписание: {class_name} {profile} {day} {lesson_number} {subject} {room}")
 
 def clear_schedule():
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute('DELETE FROM schedule')
         conn.commit()
+    logger.info("Таблица schedule очищена")
 
 def get_classes_with_profiles() -> List[Tuple[str, Optional[str]]]:
     with get_connection() as conn:
@@ -128,6 +134,7 @@ def set_user(user_id: int, class_name: str, profile: Optional[str]):
             ON CONFLICT(user_id) DO UPDATE SET class_name=excluded.class_name, profile=excluded.profile
         ''', (user_id, class_name, profile))
         conn.commit()
+    logger.info(f"Пользователь {user_id} установил класс {class_name} {profile}")
 
 def get_user(user_id: int) -> Optional[Tuple[str, Optional[str]]]:
     with get_connection() as conn:
@@ -149,6 +156,7 @@ def set_notify(user_id: int, enabled: bool):
         cur = conn.cursor()
         cur.execute('UPDATE users SET notify = ? WHERE user_id = ?', (1 if enabled else 0, user_id))
         conn.commit()
+    logger.info(f"Пользователь {user_id} установил уведомления: {enabled}")
 
 def get_notify_status(user_id: int) -> bool:
     with get_connection() as conn:
@@ -166,6 +174,7 @@ def mark_notification_sent(user_id: int, lesson_number: int):
             VALUES (?, ?, ?)
         ''', (user_id, date, lesson_number))
         conn.commit()
+    logger.debug(f"Отметка отправки уведомления user={user_id} lesson={lesson_number}")
 
 def check_notification_sent(user_id: int, lesson_number: int) -> bool:
     date = datetime.date.today().isoformat()
@@ -187,6 +196,7 @@ def add_replacement(date: str, lesson_number: int, class_name: str, subject: str
             VALUES (?, ?, ?, ?, ?, ?)
         ''', (date, lesson_number, class_name, subject, teacher, room))
         conn.commit()
+    logger.debug(f"Добавлена замена: {date} {lesson_number} {class_name} {subject}")
 
 def clear_old_replacements(before_date: str):
     """Удалить замены раньше указанной даты (включительно)"""
@@ -194,9 +204,9 @@ def clear_old_replacements(before_date: str):
         cur = conn.cursor()
         cur.execute('DELETE FROM replacements WHERE date <= ?', (before_date,))
         conn.commit()
+    logger.info(f"Удалены замены до {before_date}")
 
 def get_replacements_for_date(date: str) -> List[Tuple[int, str, str, Optional[str], Optional[str]]]:
-    """Возвращает список замен на конкретную дату: (урок, класс, предмет, учитель, кабинет)"""
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute('''
@@ -208,10 +218,6 @@ def get_replacements_for_date(date: str) -> List[Tuple[int, str, str, Optional[s
         return cur.fetchall()
 
 def get_replacements_for_date_and_class(date: str, class_name: str) -> dict[int, tuple[Optional[str], Optional[str]]]:
-    """
-    Возвращает словарь замен для конкретной даты и класса:
-    ключ = номер урока, значение = (учитель, кабинет)
-    """
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute('''
@@ -223,7 +229,6 @@ def get_replacements_for_date_and_class(date: str, class_name: str) -> dict[int,
     return {row[0]: (row[1], row[2]) for row in rows}
 
 def get_all_future_replacements() -> List[Tuple[str, int, str, str, Optional[str], Optional[str]]]:
-    """Возвращает все будущие замены (начиная с сегодня)"""
     today = datetime.date.today().isoformat()
     with get_connection() as conn:
         cur = conn.cursor()

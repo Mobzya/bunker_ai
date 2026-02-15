@@ -8,9 +8,19 @@ from bot.db import init_db
 from bot.handlers import start, schedule, notify
 from bot.notifier import notification_worker
 
-logging.basicConfig(level=logging.INFO)
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+# Уменьшаем уровень логов от aiogram, чтобы не засорять консоль
+logging.getLogger('aiogram').setLevel(logging.WARNING)
+logging.getLogger('aiogram.event').setLevel(logging.WARNING)
+
+logger = logging.getLogger(__name__)
 
 async def main():
+    logger.info("Запуск бота")
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
 
