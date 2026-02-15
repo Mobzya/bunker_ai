@@ -84,27 +84,51 @@ async def cmd_start(message: Message, state: FSMContext):
     user_id = message.from_user.id
     user_name = message.from_user.first_name or "Пользователь"
     logger.info(f"Команда /start от пользователя {user_id} ({user_name})")
-    await send_main_menu(message, user_id, user_name)
+    user_data = get_user(user_id)
+    if user_data:
+        await send_main_menu(message, user_id, user_name)
+    else:
+        parallels = get_parallels()
+        if not parallels:
+            logger.error("Нет данных о параллелях в БД!")
+            await message.answer("❌ Система ещё не настроена. Попробуйте позже.")
+            return
+        await state.set_state(ClassChoice.waiting_for_parallel)
+        current_state = await state.get_state()
+        await message.answer(
+            "Выбери цифру класса:",
+            reply_markup=get_parallels_keyboard(parallels)
+        )
 
 @router.callback_query(ClassChoice.waiting_for_parallel, F.data.startswith("parallel_"))
 async def parallel_chosen(callback: CallbackQuery, state: FSMContext):
-    parallel = callback.data.replace("parallel_", "")
-    logger.info(f"Пользователь {callback.from_user.id} выбрал параллель {parallel}")
-    letters = get_letters_by_parallel(parallel)
-    if not letters:
-        logger.warning(f"Для параллели {parallel} нет классов")
-        await callback.answer("Для этой параллели нет классов", show_alert=True)
-        return
-    await state.update_data(chosen_parallel=parallel)
-    await state.set_state(ClassChoice.waiting_for_letter)
-    await callback.message.edit_text(
-        "Выбери букву класса:",
-        reply_markup=get_letters_keyboard(letters, parallel)
-    )
-    await callback.answer()
+    logger.info(f"parallel_chosen вызван: data={callback.data}, user={callback.from_user.id}")
+    await callback.answer()  # сразу убираем "часики"
+
+    # Проверим текущее состояние
+    current_state = await state.get_state()
+    logger.info(f"Текущее состояние пользователя: {current_state}")
+
+    try:
+        parallel = callback.data.replace("parallel_", "")
+        letters = get_letters_by_parallel(parallel)
+        if not letters:
+            await callback.message.edit_text("❌ Для этой параллели нет классов.")
+            return
+
+        await state.update_data(chosen_parallel=parallel)
+        await state.set_state(ClassChoice.waiting_for_letter)
+        await callback.message.edit_text(
+            "Выбери букву класса:",
+            reply_markup=get_letters_keyboard(letters, parallel)
+        )
+    except Exception as e:
+        logger.exception(f"Ошибка в parallel_chosen: {e}")
+        await callback.message.edit_text("❌ Произошла ошибка. Попробуйте /start заново.")
 
 @router.callback_query(ClassChoice.waiting_for_letter, F.data.startswith("letter_"))
 async def letter_chosen(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()   
     full_class = callback.data.replace("letter_", "")
     logger.info(f"Пользователь {callback.from_user.id} выбрал класс {full_class}")
     classes_with_profiles = get_classes_with_profiles()
@@ -119,6 +143,8 @@ async def letter_chosen(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(ClassChoice.waiting_for_profile, F.data.startswith("profile_"))
 async def profile_chosen(callback: CallbackQuery, state: FSMContext):
+    logger.info(f"Получен callback {callback.data} от пользователя {callback.from_user.id}")
+    await callback.answer() 
     parts = callback.data.split("_", 2)
     if len(parts) != 3:
         logger.error(f"Неверный формат callback_data: {callback.data}")
