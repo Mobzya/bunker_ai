@@ -1,6 +1,8 @@
 import os
 import datetime
 
+TIMEZONE = 'Europe/Moscow'
+
 BOT_TOKEN = "8184763713:AAGsjOyZGqLPfq8AbdeQ3GfXahdTSfen8pw"
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
