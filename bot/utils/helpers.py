@@ -69,7 +69,6 @@ def get_current_next_lesson(schedule_today, replacements=None):
         start, end = LESSON_TIMES[current_lesson_num - 1]
         repl_teacher, repl_room = repl_dict.get(current_lesson_num, (None, None))
 
-        # Для расчёта прогресса используем сегодняшнюю дату в нужном поясе
         now = datetime.datetime.now(tz)
         start_dt = datetime.datetime.combine(now.date(), start, tzinfo=tz)
         end_dt = datetime.datetime.combine(now.date(), end, tzinfo=tz)
@@ -77,6 +76,7 @@ def get_current_next_lesson(schedule_today, replacements=None):
         total_seconds = (end_dt - start_dt).total_seconds()
         elapsed = (now - start_dt).total_seconds()
         progress = min(100, int(elapsed / total_seconds * 100)) if total_seconds > 0 else 0
+        remaining_min = max(0, int((end_dt - now).total_seconds() // 60))
 
         current_info = {
             'number': current_lesson_num,
@@ -85,6 +85,7 @@ def get_current_next_lesson(schedule_today, replacements=None):
             'start': start,
             'end': end,
             'progress': progress,
+            'remaining_min': remaining_min,
             'repl_teacher': repl_teacher,
             'repl_room': repl_room
         }
@@ -140,11 +141,10 @@ def format_lesson_block(lesson_info, is_current=False):
 
     if is_current:
         progress = lesson_info['progress']
+        remaining = lesson_info.get('remaining_min', 0)
         filled = progress // 10
         empty = 10 - filled
         bar = '🟩' * filled + '⬛' * empty
-        remaining = lesson_info.get('remaining_min', 0)  # можно вычислить, но уже есть в current_info
-        # Для красоты можно вычислить остаток
         lines.append(f"   [{bar}] {progress}% (осталось {remaining} мин)")
 
     return "\n".join(lines)
