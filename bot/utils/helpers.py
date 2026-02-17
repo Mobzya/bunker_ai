@@ -1,8 +1,12 @@
+ # ---- Функции для главного меню ----
+
 import datetime
 import logging
-from bot.config import LESSON_TIMES
+from zoneinfo import ZoneInfo  # добавьте импорт
+from bot.config import LESSON_TIMES, TIMEZONE
 
 logger = logging.getLogger(__name__)
+
 
 def format_class_display(class_name: str, profile: str | None) -> str:
     if profile:
@@ -29,14 +33,12 @@ def format_date_short(date_str: str) -> str:
     except:
         return date_str
 
-# ---- Функции для главного меню ----
 
 def get_current_next_lesson(schedule_today, replacements=None):
-    """
-    schedule_today: список кортежей (lesson_num, subject, room) для сегодня
-    replacements: словарь {lesson_num: (teacher, room)} или None
-    """
-    now_time = datetime.datetime.now().time()
+    # Получаем текущее время в московском часовом поясе
+    tz = ZoneInfo(TIMEZONE)
+    now_time = datetime.datetime.now(tz).time()
+    
     current_lesson_num = None
     next_lesson_num = None
 
@@ -56,7 +58,7 @@ def get_current_next_lesson(schedule_today, replacements=None):
                 current_lesson_num = None
                 next_lesson_num = None
 
-    schedule_dict = {num: (subj, room) for num, subj, room in schedule_today}
+    
     repl_dict = replacements if replacements else {}
 
     current_info = None
