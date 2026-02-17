@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import csv
 import requests
 import sys
@@ -6,6 +9,7 @@ import logging
 from datetime import datetime, timedelta
 from io import StringIO
 
+# Добавляем путь к корню проекта для импорта модулей бота
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from bot.db import init_db, add_replacement, clear_old_replacements
@@ -19,16 +23,13 @@ def download_csv(url):
     try:
         response = requests.get(url, timeout=30)
         response.raise_for_status()
-        
-        # Пробуем определить реальную кодировку по содержимому
+
         import chardet
         detected = chardet.detect(response.content)
         encoding = detected.get('encoding', 'utf-8')
         logger.info(f"Определена кодировка: {encoding}")
-        
-        # Декодируем в UTF-8
+
         content = response.content.decode(encoding, errors='replace').encode('utf-8').decode('utf-8')
-        
         csv_data = StringIO(content)
         reader = csv.reader(csv_data)
         rows = list(reader)
@@ -47,7 +48,6 @@ def parse_replacements(rows):
         if not row or len(row) == 0:
             continue
         first_cell = row[0].strip()
-        # Удаляем возможный BOM
         if first_cell.startswith('\ufeff'):
             first_cell = first_cell[1:].strip()
         if first_cell == 'дата':
@@ -56,12 +56,9 @@ def parse_replacements(rows):
 
     if header_idx is None:
         logger.error("Не найден заголовок таблицы замен")
-        # Для отладки выведем первые 10 строк
         for idx, r in enumerate(rows[:10]):
             logger.info(f"Строка {idx}: {r}")
         return 0
-
-    # Далее код без изменений...
 
     headers = rows[header_idx]
     try:
@@ -118,7 +115,8 @@ def parse_replacements(rows):
     logger.info(f"Добавлено замен: {added}, пропущено (прошлые или битые): {skipped}")
     return added
 
-def main():
+def update_replacements():
+    """Функция для вызова из планировщика или из командной строки"""
     logger.info("="*50)
     logger.info("Обновление таблицы замен...")
     init_db()
@@ -130,6 +128,9 @@ def main():
         logger.info(f"Обновление завершено. Всего актуальных замен в БД: {added}")
     else:
         logger.error("Не удалось получить данные.")
+
+def main():
+    update_replacements()
 
 if __name__ == "__main__":
     main()

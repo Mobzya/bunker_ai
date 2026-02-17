@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import csv
 import requests
 import sys
@@ -5,7 +8,7 @@ import os
 import re
 import chardet
 import logging
-from io import StringIO, BytesIO
+from io import StringIO
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -28,12 +31,12 @@ def download_csv_with_encoding(url):
     logger.info(f"Скачивание: {url}")
     response = requests.get(url, timeout=30)
     response.raise_for_status()
-    
+
     content = response.content
     detected = chardet.detect(content)
     encoding = detected.get('encoding', 'utf-8')
     logger.info(f"Определена кодировка: {encoding}")
-    
+
     try:
         text = content.decode(encoding)
     except UnicodeDecodeError:
@@ -98,13 +101,41 @@ def parse_schedule_data(rows, source_name):
             i += 1
             continue
 
-        if row[0] and row[0].strip() in days:
-            current_day = row[0].strip()
+        # Проверка: строка является днём?
+        day_cell = row[0].strip() if row[0] else ''
+        if day_cell in days:
+            current_day = day_cell
+            logger.debug(f"  Установлен день: {current_day} (строка {i})")
+
+            # Проверяем, есть ли в этой же строке первый урок (во втором столбце)
+            if len(row) > 1 and row[1] and row[1].strip().isdigit():
+                lesson_num = int(row[1].strip())
+                if 1 <= lesson_num <= 8:
+                    for cls in classes:
+                        subj_idx = cls['subject_idx']
+                        room_idx = cls['room_idx']
+                        subject = row[subj_idx].strip() if subj_idx < len(row) else ''
+                        room = row[room_idx].strip() if room_idx < len(row) else ''
+                        if subject and subject.lower() not in ['', 'каб', 'предмет']:
+                            add_schedule(cls['name'], cls['profile'], current_day, lesson_num, subject, room)
+                            added += 1
+                    logger.debug(f"    + обработан первый урок {lesson_num} из строки дня")
             i += 1
             continue
 
-        if len(row) > 1 and row[1].strip().isdigit():
+        # Проверка: строка является уроком?
+        lesson_num = None
+        if row[0] and row[0].strip().isdigit():
+            lesson_num = int(row[0].strip())
+        elif len(row) > 1 and row[1] and row[1].strip().isdigit():
             lesson_num = int(row[1].strip())
+
+        if lesson_num is not None and 1 <= lesson_num <= 8:
+            if current_day is None:
+                logger.warning(f"Урок {lesson_num} встретился до указания дня, пропускаем строку {i}")
+                i += 1
+                continue
+
             for cls in classes:
                 subj_idx = cls['subject_idx']
                 room_idx = cls['room_idx']
@@ -114,12 +145,18 @@ def parse_schedule_data(rows, source_name):
                     add_schedule(cls['name'], cls['profile'], current_day, lesson_num, subject, room)
                     added += 1
             i += 1
-        else:
-            i += 1
+            continue
 
+        # Всё остальное пропускаем
+        i += 1
+
+    logger.info(f"  Добавлено записей для {source_name}: {added}")
     return added
 
-def update_all_schedules():
+def update_schedule():
+    """Функция для вызова из планировщика или из командной строки"""
+    logger.info("="*50)
+    logger.info("Начало полного обновления расписания...")
     init_db()
     clear_schedule()
 
@@ -132,12 +169,7 @@ def update_all_schedules():
             reader = csv.reader(csv_data)
             rows = list(reader)
             logger.info(f"Скачано строк: {len(rows)}")
-            
-            # Отладка: покажем несколько первых строк для проверки
-            logger.debug("Первые 5 строк после декодирования:")
-            for idx, row in enumerate(rows[:5]):
-                logger.debug(f"{idx}: {row}")
-            
+
             added = parse_schedule_data(rows, f"{class_num} класс")
             logger.info(f"Добавлено записей для {class_num} класса: {added}")
             total_added += added
@@ -146,5 +178,8 @@ def update_all_schedules():
 
     logger.info(f"\nВсего добавлено записей: {total_added}")
 
+def main():
+    update_schedule()
+
 if __name__ == "__main__":
-    update_all_schedules()
+    main()

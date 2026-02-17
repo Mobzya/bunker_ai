@@ -2,7 +2,14 @@ import asyncio
 import datetime
 import logging
 from aiogram import Bot
-from bot.db import get_all_users_with_notify, get_schedule, mark_notification_sent, check_notification_sent
+from bot.db import (
+    get_all_users_with_notify,
+    get_schedule,
+    mark_notification_sent,
+    check_notification_sent,
+    get_last_notification,
+    set_last_notification
+)
 from bot.config import WEEKDAY_MAP, LESSON_TIMES
 
 logger = logging.getLogger(__name__)
@@ -37,7 +44,6 @@ def should_notify_now(now_time):
 async def notification_worker(bot: Bot):
     logger.info(f"Уведомитель запущен (за {NOTIFY_BEFORE_MINUTES} мин до урока)")
     while True:
-        
         try:
             now = datetime.datetime.now()
             # Выходные пропускаем
@@ -72,8 +78,21 @@ async def notification_worker(bot: Bot):
                             f"🚪 Кабинет: {room}\n"
                             f"⏰ Начало в {start_time}\n"
                         )
+
+                        # --- Удаление предыдущего уведомления ---
+                        last_msg_id = get_last_notification(user_id)
+                        if last_msg_id:
+                            try:
+                                await bot.delete_message(chat_id=user_id, message_id=last_msg_id)
+                                logger.info(f"Удалено предыдущее уведомление для user {user_id}")
+                            except Exception as e:
+                                # Если не удалось удалить (сообщение слишком старое или уже удалено), просто логируем
+                                logger.debug(f"Не удалось удалить предыдущее уведомление для {user_id}: {e}")
+                        # ----------------------------------------
                         try:
-                            await bot.send_message(user_id, text, parse_mode="HTML")
+                            sent_msg = await bot.send_message(user_id, text, parse_mode="HTML")
+                            # Сохраняем ID нового сообщения
+                            set_last_notification(user_id, sent_msg.message_id)
                             mark_notification_sent(user_id, next_lesson_to_notify)
                             logger.info(f"Уведомление отправлено пользователю {user_id} (урок {next_lesson_to_notify})")
                         except Exception as e:

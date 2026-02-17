@@ -55,6 +55,13 @@ def init_db():
                 UNIQUE(date, class_name, lesson_number)
             )
         ''')
+        # Новая таблица для хранения последнего отправленного уведомления
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS last_notification (
+                user_id INTEGER PRIMARY KEY,
+                message_id INTEGER NOT NULL
+            )
+        ''')
         conn.commit()
     logger.info("База данных инициализирована")
 
@@ -143,7 +150,7 @@ def get_user(user_id: int) -> Optional[Tuple[str, Optional[str]]]:
         row = cur.fetchone()
         return row if row else None
 
-# ========== УВЕДОМЛЕНИЯ ==========
+# ========== УВЕДОМЛЕНИЯ (обычные) ==========
 
 def get_all_users_with_notify() -> List[Tuple[int, str, Optional[str]]]:
     with get_connection() as conn:
@@ -185,6 +192,35 @@ def check_notification_sent(user_id: int, lesson_number: int) -> bool:
             WHERE user_id = ? AND date = ? AND lesson_number = ?
         ''', (user_id, date, lesson_number))
         return cur.fetchone() is not None
+
+# ========== ПОСЛЕДНЕЕ УВЕДОМЛЕНИЕ (для удаления) ==========
+
+def set_last_notification(user_id: int, message_id: int):
+    """Сохраняет message_id последнего отправленного уведомления для пользователя"""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute('''
+            INSERT OR REPLACE INTO last_notification (user_id, message_id)
+            VALUES (?, ?)
+        ''', (user_id, message_id))
+        conn.commit()
+    logger.debug(f"Сохранено последнее уведомление для user {user_id}: message_id {message_id}")
+
+def get_last_notification(user_id: int) -> Optional[int]:
+    """Возвращает message_id последнего уведомления или None"""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute('SELECT message_id FROM last_notification WHERE user_id = ?', (user_id,))
+        row = cur.fetchone()
+        return row[0] if row else None
+
+def clear_last_notification(user_id: int):
+    """Удаляет запись о последнем уведомлении (например, если сообщение было удалено вручную)"""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute('DELETE FROM last_notification WHERE user_id = ?', (user_id,))
+        conn.commit()
+    logger.debug(f"Очищена запись последнего уведомления для user {user_id}")
 
 # ========== ЗАМЕНЫ ==========
 
