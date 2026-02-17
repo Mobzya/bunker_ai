@@ -1,8 +1,6 @@
 import os
 import datetime
 
-TIMEZONE = 'Europe/Moscow'
-
 BOT_TOKEN = "8184763713:AAGsjOyZGqLPfq8AbdeQ3GfXahdTSfen8pw"
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -20,7 +18,7 @@ WEEKDAY_MAP = {
     6: "воскресенье"
 }
 
-# Время уроков (начало, конец)
+# Время уроков (начало, конец) по московскому времени
 LESSON_TIMES = [
     (datetime.time(8, 15), datetime.time(9, 0)),
     (datetime.time(9, 15), datetime.time(10, 0)),
@@ -31,6 +29,9 @@ LESSON_TIMES = [
     (datetime.time(14, 15), datetime.time(15, 0)),
     (datetime.time(15, 15), datetime.time(16, 0)),
 ]
+
+# Часовой пояс бота (для корректного определения текущего урока)
+TIMEZONE = 'Europe/Moscow'
 
 # --- Ссылки для автоматического обновления ---
 REPLACEMENTS_URL = "https://docs.google.com/spreadsheets/d/1ssv52YzwfZ3S-azlDu49_hyLnF-TMJYf3lo-WbdmvI8/export?format=csv&gid=122869822"
