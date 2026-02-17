@@ -1,12 +1,9 @@
- # ---- Функции для главного меню ----
-
 import datetime
 import logging
-from zoneinfo import ZoneInfo  # добавьте импорт
+from zoneinfo import ZoneInfo
 from bot.config import LESSON_TIMES, TIMEZONE
 
 logger = logging.getLogger(__name__)
-
 
 def format_class_display(class_name: str, profile: str | None) -> str:
     if profile:
@@ -33,12 +30,17 @@ def format_date_short(date_str: str) -> str:
     except:
         return date_str
 
+# ---- Функции для главного меню ----
 
 def get_current_next_lesson(schedule_today, replacements=None):
-    # Получаем текущее время в московском часовом поясе
+    """
+    schedule_today: список кортежей (lesson_num, subject, room) для сегодня
+    replacements: словарь {lesson_num: (teacher, room)} или None
+    """
+    # Текущее время в московском часовом поясе
     tz = ZoneInfo(TIMEZONE)
     now_time = datetime.datetime.now(tz).time()
-    
+
     current_lesson_num = None
     next_lesson_num = None
 
@@ -58,7 +60,7 @@ def get_current_next_lesson(schedule_today, replacements=None):
                 current_lesson_num = None
                 next_lesson_num = None
 
-    
+    schedule_dict = {num: (subj, room) for num, subj, room in schedule_today}
     repl_dict = replacements if replacements else {}
 
     current_info = None
@@ -67,10 +69,14 @@ def get_current_next_lesson(schedule_today, replacements=None):
         start, end = LESSON_TIMES[current_lesson_num - 1]
         repl_teacher, repl_room = repl_dict.get(current_lesson_num, (None, None))
 
-        total_seconds = (datetime.datetime.combine(datetime.date.today(), end) -
-                         datetime.datetime.combine(datetime.date.today(), start)).total_seconds()
-        elapsed = (datetime.datetime.now() - datetime.datetime.combine(datetime.date.today(), start)).total_seconds()
-        progress = min(100, int(elapsed / total_seconds * 100))
+        # Для расчёта прогресса используем сегодняшнюю дату в нужном поясе
+        now = datetime.datetime.now(tz)
+        start_dt = datetime.datetime.combine(now.date(), start, tzinfo=tz)
+        end_dt = datetime.datetime.combine(now.date(), end, tzinfo=tz)
+
+        total_seconds = (end_dt - start_dt).total_seconds()
+        elapsed = (now - start_dt).total_seconds()
+        progress = min(100, int(elapsed / total_seconds * 100)) if total_seconds > 0 else 0
 
         current_info = {
             'number': current_lesson_num,
@@ -137,13 +143,9 @@ def format_lesson_block(lesson_info, is_current=False):
         filled = progress // 10
         empty = 10 - filled
         bar = '🟩' * filled + '⬛' * empty
-        now = datetime.datetime.now()
-        end_dt = datetime.datetime.combine(datetime.date.today(), lesson_info['end'])
-        remaining = end_dt - now
-        remaining_min = int(remaining.total_seconds() // 60)
-        if remaining_min < 0:
-            remaining_min = 0
-        lines.append(f"   [{bar}] {progress}% (осталось {remaining_min} мин)")
+        remaining = lesson_info.get('remaining_min', 0)  # можно вычислить, но уже есть в current_info
+        # Для красоты можно вычислить остаток
+        lines.append(f"   [{bar}] {progress}% (осталось {remaining} мин)")
 
     return "\n".join(lines)
 
