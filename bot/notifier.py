@@ -1,33 +1,23 @@
-import asyncio
 import datetime
+import asyncio
 import logging
+from zoneinfo import ZoneInfo
 from aiogram import Bot
 from bot.db import (
-    get_all_users_with_notify,
-    get_schedule,
-    mark_notification_sent,
-    check_notification_sent,
-    get_last_notification,
-    set_last_notification
+    get_all_users_with_notify, get_schedule, mark_notification_sent,
+    check_notification_sent, get_last_notification, set_last_notification
 )
-from bot.config import WEEKDAY_MAP, LESSON_TIMES
+from bot.config import WEEKDAY_MAP, LESSON_TIMES, TIMEZONE
 
 logger = logging.getLogger(__name__)
-
-# Время за сколько минут до урока отправлять уведомление
 NOTIFY_BEFORE_MINUTES = 16
+tz = ZoneInfo(TIMEZONE)
 
 def get_next_lesson_start_time(now_time):
-    """
-    Определяет номер следующего урока и время его начала.
-    Возвращает (next_lesson_number, start_time) или (None, None), если уроков больше нет.
-    """
-    now = datetime.datetime.now().time()
+    """Определяет номер следующего урока и время его начала (now_time уже в МСК)."""
     for i, (start, end) in enumerate(LESSON_TIMES, start=1):
-        if now < start:
-            # ещё не начался этот урок
+        if now_time < start:
             return i, start
-        # после окончания урока проверяем следующий
     return None, None
 
 def should_notify_now(now_time):
@@ -35,24 +25,22 @@ def should_notify_now(now_time):
     if not next_lesson:
         return None
     notify_time = (datetime.datetime.combine(datetime.date.today(), next_start) -
-                    datetime.timedelta(minutes=NOTIFY_BEFORE_MINUTES)).time()
-    # Учитываем случай, если notify_time меньше 00:00 (не должно быть)
+                   datetime.timedelta(minutes=NOTIFY_BEFORE_MINUTES)).time()
     if notify_time <= now_time < next_start:
         return next_lesson
     return None
 
 async def notification_worker(bot: Bot):
-    logger.info(f"Уведомитель запущен (за {NOTIFY_BEFORE_MINUTES} мин до урока)")
+    logger.info(f"Уведомитель запущен (за {NOTIFY_BEFORE_MINUTES} мин до урока, часовой пояс {TIMEZONE})")
     while True:
         try:
-            now = datetime.datetime.now()
-            # Выходные пропускаем
-            if now.weekday() >= 5:
+            now = datetime.datetime.now(tz)
+            if now.weekday() >= 5:  # суббота, воскресенье
                 await asyncio.sleep(60)
                 continue
 
             next_lesson_to_notify = should_notify_now(now.time())
-            if next_lesson_to_notify is not None:
+            if next_lesson_to_notify:
                 users = get_all_users_with_notify()
                 logger.debug(f"Проверка уведомлений для {len(users)} пользователей (урок {next_lesson_to_notify})")
                 for user_id, class_name, profile in users:
