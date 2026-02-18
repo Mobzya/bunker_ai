@@ -24,7 +24,7 @@ def setup_scheduler():
     # Обновление расписания каждые 4 дня в 3:00
     scheduler.add_job(
         update_schedule,
-        trigger=CronTrigger(hour="/*8"),
+        trigger=CronTrigger(hour="*/8"),
         id="update_schedule_every_4_days",
         name="Обновление расписания раз в 4 дня",
         replace_existing=True,
