@@ -16,7 +16,7 @@ from bot.db import (
 from bot.config import DAYS, WEEKDAY_MAP
 from bot.utils import format_class_display, format_lesson_with_replacement, format_date_short
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(name)
 
 router = Router()
 
@@ -104,7 +104,6 @@ async def show_week(callback: CallbackQuery):
     # Определяем даты для дней недели, начиная с сегодня
     today = datetime.today()
     week_dates = get_week_dates(today)
-
     # Получаем замены для каждого дня из week_dates
     replacements_by_day = {}
     for day_name, date_str in week_dates.items():
@@ -160,56 +159,88 @@ async def show_replacements(callback: CallbackQuery):
         else:
             other_repl.append(repl)
 
-    text_parts = []
+    # Функция построения текста по заданным спискам
+    def build_text(user_list, other_list):
+        parts = []
 
-    # Блок замен для класса пользователя
-    text_parts.append("<b>🔔 Замены для вашего класса</b>:\n")
-    if user_repl:
-        by_date = {}
-        for date, lesson, repl_class, subject, teacher, room in user_repl:
-            by_date.setdefault(date, []).append((lesson, subject, teacher, room))
-        for date in sorted(by_date.keys()):
-            text_parts.append(f"\n📅 {format_date_short(date)}:")
-            for lesson, subject, teacher, room in sorted(by_date[date], key=lambda x: x[0]):
-                line = f"  • {lesson} урок — <b>{subject}</b>"
-                if teacher or room:
-                    line += " ("
-                    if teacher:
-                        line += f"👤 {teacher}"
-                    if teacher and room:
-                        line += ", "
-                    if room:
-                        line += f"🚪 {room}"
-                    line += ")"
-                text_parts.append(line)
+        # Блок замен для класса пользователя
+        parts.append("<b>🔔 Замены для вашего класса</b>:\n")
+        if user_list:
+            by_date = {}
+            for date, lesson, repl_class, subject, teacher, room in user_list:
+                by_date.setdefault(date, []).append((lesson, subject, teacher, room))
+            for date in sorted(by_date.keys()):
+                parts.append(f"\n📅 {format_date_short(date)}:")
+                for lesson, subject, teacher, room in sorted(by_date[date], key=lambda x: x[0]):
+                    line = f"  • {lesson} урок — <b>{subject}</b>"
+                    if teacher or room:
+                        line += " ("
+                        if teacher:
+                            line += f"👤 {teacher}"
+                        if teacher and room:
+                            line += ", "
+                        if room:
+                            line += f"🚪 {room}"
+                        line += ")"
+                    parts.append(line)
+        else:
+            parts.append("   Нет замен для вашего класса.")
+
+        # Разделитель
+        parts.append("\n\n<b>📌 Остальные замены</b>:\n")
+
+        if other_list:
+            by_date = {}
+            for date, lesson, repl_class, subject, teacher, room in other_list:
+                by_date.setdefault(date, []).append((lesson, repl_class, subject, teacher, room))
+            for date in sorted(by_date.keys()):
+                parts.append(f"\n📅 {format_date_short(date)}:")
+                for lesson, repl_class, subject, teacher, room in sorted(by_date[date], key=lambda x: (x[1], x[0])):
+                    line = f"  • {lesson} урок — <b>{repl_class}</b>, {subject}"
+                    if teacher or room:
+                        line += " ("
+                        if teacher:
+                            line += f"👤 {teacher}"
+                        if teacher and room:
+                            line += ", "
+                        if room:
+                            line += f"🚪 {room}"
+                        line += ")"
+                    parts.append(line)
+        else:
+            parts.append("   Нет других замен.")
+
+        return "\n".join(parts)
+
+    # Сначала пробуем полный текст
+    full_text = build_text(user_repl, other_repl)
+    text_length = len(full_text)
+
+    # Если слишком длинно (с запасом 4000), убираем сегодняшний день
+    if text_length > 4000:
+        today_str = datetime.now().date().isoformat()
+        # Фильтруем, исключая сегодняшнюю дату
+        user_repl_filtered = [r for r in user_repl if r[0] != today_str]
+        other_repl_filtered = [r for r in other_repl if r[0] != today_str]
+
+        # Пробуем построить текст без сегодня
+        filtered_text = build_text(user_repl_filtered, other_repl_filtered)
+        if len(filtered_text) > 4000:
+            # Всё ещё длинно – дополнительно ограничиваем остальные замены до 10 ближайших
+            # Сортируем other_repl_filtered по дате и уроку
+            other_repl_filtered.sort(key=lambda x: (x[0], x[1]))
+            other_repl_limited = other_repl_filtered[:10]
+            filtered_text = build_text(user_repl_filtered, other_repl_limited)
+            # Добавляем предупреждение об обрезании
+            filtered_text += "\n\n⚠️ <i>Показаны не все замены из-за ограничений длины сообщения.</i>"
+        else:
+            # Добавляем предупреждение, что убраны замены на сегодня
+            filtered_text += "\n\n⚠️ <i>Замены на сегодня не показаны, так как сообщение было слишком длинным.</i>"
+
+        final_text = filtered_text
     else:
-        text_parts.append("   Нет замен для вашего класса.")
+        final_text = full_text
 
-    # Разделитель
-    text_parts.append("\n\n<b>📌 Остальные замены</b>:\n")
-
-    if other_repl:
-        by_date = {}
-        for date, lesson, repl_class, subject, teacher, room in other_repl:
-            by_date.setdefault(date, []).append((lesson, repl_class, subject, teacher, room))
-        for date in sorted(by_date.keys()):
-            text_parts.append(f"\n📅 {format_date_short(date)}:")
-            for lesson, repl_class, subject, teacher, room in sorted(by_date[date], key=lambda x: (x[1], x[0])):
-                line = f"  • {lesson} урок — <b>{repl_class}</b>, {subject}"
-                if teacher or room:
-                    line += " ("
-                    if teacher:
-                        line += f"👤 {teacher}"
-                    if teacher and room:
-                        line += ", "
-                    if room:
-                        line += f"🚪 {room}"
-                    line += ")"
-                text_parts.append(line)
-    else:
-        text_parts.append("   Нет других замен.")
-
-    final_text = "\n".join(text_parts)
     notify_enabled = get_notify_status(user_id)
     await callback.message.edit_text(final_text, parse_mode="HTML", reply_markup=get_main_keyboard(notify_enabled))
     await callback.answer()
