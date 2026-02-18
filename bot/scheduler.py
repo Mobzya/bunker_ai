@@ -13,7 +13,7 @@ def setup_scheduler():
     # Обновление замен каждый день в 3:00
     scheduler.add_job(
         update_replacements,
-        trigger=CronTrigger(hour=3, minute=0),
+        trigger=CronTrigger(hour="*/4"),
         id="update_replacements_daily",
         name="Ежедневное обновление замен",
         replace_existing=True,
@@ -24,7 +24,7 @@ def setup_scheduler():
     # Обновление расписания каждые 4 дня в 3:00
     scheduler.add_job(
         update_schedule,
-        trigger=CronTrigger(day="*/4", hour=3, minute=0),
+        trigger=CronTrigger(hours="/*8"),
         id="update_schedule_every_4_days",
         name="Обновление расписания раз в 4 дня",
         replace_existing=True,
